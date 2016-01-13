@@ -1,16 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
-	"github.com/hpcloud/tail"
 	"github.com/pubnub/go/messaging"
+	"io"
 	"log"
+	"os"
 	"time"
 )
 
 var (
-	logFile      string
 	pubKey       string
 	subscribeKey string
 	secretKey    string
@@ -19,33 +20,45 @@ var (
 
 func main() {
 
-	initVars()
+	initFlags()
 
 	done := make(chan bool)
 
 	// Process events
 	go func() {
 
-		t, err := tail.TailFile(logFile, tail.Config{Follow: true})
-		for line := range t.Lines {
-			log.Println(line.Text)
+		in := bufio.NewReader(os.Stdin)
+		stats, err := os.Stdin.Stat()
 
-			pubInstance := messaging.NewPubnub(pubKey, subscribeKey, secretKey, "", false, channelName)
+		if err != nil {
+			fmt.Println("file.Stat()", err)
+		}
 
-			var errorChannel = make(chan []byte)
-			var callbackChannel = make(chan []byte)
-			go pubInstance.Publish(channelName, line.Text, callbackChannel, errorChannel)
-			go handleResult(callbackChannel, errorChannel, 1000, "Publish")
-			// please goto the top of this file see the implementation of handleResult
+		if stats.Size() > 0 {
+
+			for {
+				input, err := in.ReadString('\n')
+				if err != nil && err == io.EOF {
+					break
+				}
+
+				pubInstance := messaging.NewPubnub(pubKey, subscribeKey, secretKey, "", false, channelName)
+
+				var errorChannel = make(chan []byte)
+				var callbackChannel = make(chan []byte)
+				go pubInstance.Publish(channelName, input, callbackChannel, errorChannel)
+				go handleResult(callbackChannel, errorChannel, 1000, "Publish")
+
+				if nil != err {
+					return
+				}
+
+			}
 
 		}
 
-		if nil != err {
-			return
-		}
 	}()
 
-	// Hang so program doesn't exit
 	<-done
 
 }
@@ -86,11 +99,10 @@ func handleResult(successChannel, errorChannel chan []byte, timeoutVal int64, ac
 	}
 }
 
-func initVars() {
+func initFlags() {
 	flag.StringVar(&pubKey, "pubKey", "", "pubnub public key")
 	flag.StringVar(&subscribeKey, "subscribeKey", "", "pubnub subscribe key")
 	flag.StringVar(&secretKey, "secretKey", "", "pubnub secret key")
-	flag.StringVar(&logFile, "logFile", "/var/logs/error.log", "complete path to log")
 	flag.StringVar(&channelName, "channelName", "", "channel name to connect to")
 
 	flag.Parse()
